@@ -48,6 +48,35 @@ public class IniFile : IIniFile
     public static bool DisallowDesktopIni { get; set; } = false;
 
     /// <summary>
+    /// Gets or sets an optional resolver that returns the raw (already decrypted)
+    /// content of an INI file that is not available on the file system, for example
+    /// because it is stored inside an encrypted asset archive. The argument is the
+    /// full path of the requested INI file. The resolver must return
+    /// <see langword="null"/> when it cannot provide the file's content.
+    /// </summary>
+    /// <remarks>
+    /// The file system always takes priority: the resolver is only consulted when a
+    /// file with the given path does not exist on disk.
+    /// </remarks>
+    public static Func<string, byte[]> PackedContentProvider { get; set; }
+
+    /// <summary>
+    /// Determines whether an INI file exists either on the file system or
+    /// through <see cref="PackedContentProvider"/>.
+    /// </summary>
+    /// <param name="path">The full path of the INI file.</param>
+    public static bool FileExists(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return false;
+
+        if (File.Exists(path))
+            return true;
+
+        return PackedContentProvider?.Invoke(path) != null;
+    }
+
+    /// <summary>
     /// Creates a new INI file instance.
     /// </summary>
     public IniFile() { }
@@ -131,12 +160,22 @@ public class IniFile : IIniFile
 
         FileInfo fileInfo = SafePath.GetFile(FilePath);
 
-        if (!fileInfo.Exists)
+        if (fileInfo.Exists)
+        {
+            using FileStream stream = fileInfo.OpenRead();
+
+            ParseIniFile(stream, null, applyBaseIni);
+            return;
+        }
+
+        byte[] packedContent = PackedContentProvider?.Invoke(FilePath);
+
+        if (packedContent == null)
             return;
 
-        using FileStream stream = fileInfo.OpenRead();
+        using var packedStream = new MemoryStream(packedContent, writable: false);
 
-        ParseIniFile(stream, null, applyBaseIni);
+        ParseIniFile(packedStream, null, applyBaseIni);
     }
 
     public void Reload()
